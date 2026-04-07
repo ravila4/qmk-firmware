@@ -21,6 +21,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include "config.h"
 #include "host.h"
 #include "keycodes.h"
+#include "raw_hid.h"
 #include "rgb_matrix.h"
 #include "user_kb.h"
 #include "ansi.h"
@@ -46,6 +47,8 @@ extern uint16_t        rf_sw_press_delay;
 extern uint16_t        rf_linking_time;
 extern DEV_INFO_STRUCT dev_info;
 extern uint8_t         rf_blink_cnt;
+
+static bool rgb_streaming_mode = false;
 
 extern void light_speed_control(uint8_t fast);
 extern void light_level_control(uint8_t brighten);
@@ -464,6 +467,7 @@ void keyboard_post_init_kb(void) {
 }
 
 bool rgb_matrix_indicators_kb(void) {
+    if (rgb_streaming_mode) return false;  // streaming mode owns all LEDs; suppresses _user too
     if (rf_blink_cnt) {
         uint8_t col = 4;
         if (dev_info.link_mode >= LINK_BT_1 && dev_info.link_mode <= LINK_BT_3) {
@@ -478,6 +482,7 @@ bool rgb_matrix_indicators_kb(void) {
 }
 
 bool rgb_matrix_indicators_advanced_kb(uint8_t led_min, uint8_t led_max) {
+    if (rgb_streaming_mode) return false;  // streaming mode owns all LEDs; suppresses _user too
     if (keymap_config.no_gui) {
         // fixed position in top right corner, key position in matrix is (0,16), led index is (16)
         rgb_matrix_set_color(get_led_index(0, 15), 0x00, 0x80, 0x00);
@@ -793,6 +798,60 @@ void via_config_get_value(uint8_t *data) {
         case id_toggle_socd_indicator:
             *value_data = g_config.show_socd_indicator;
             break;
+    }
+}
+
+// --- RGB streaming (host-controlled) ---
+#define CMD_STREAM_RGB_DATA       0x24
+#define CMD_STREAMING_MODE_ON     0x25
+#define CMD_STREAMING_MODE_OFF    0x26
+#define CMD_GET_TOTAL_LEDS        0x27
+
+bool via_command_kb(uint8_t *data, uint8_t length) {
+    switch (data[0]) {
+        case CMD_STREAMING_MODE_ON:
+            rgb_streaming_mode = true;
+            rgb_matrix_disable_noeeprom();
+            data[1] = 0x01;
+            raw_hid_send(data, length);
+            return true;
+
+        case CMD_STREAMING_MODE_OFF:
+            rgb_streaming_mode = false;
+            rgb_matrix_enable_noeeprom();
+            data[1] = 0x01;
+            raw_hid_send(data, length);
+            return true;
+
+        case CMD_STREAM_RGB_DATA: {
+            if (!rgb_streaming_mode) return true;  // silently ignore if not in streaming mode
+            uint8_t start = data[1];
+            if (start >= RGB_MATRIX_LED_COUNT) return true;
+            uint8_t count = data[2];
+            // Clamp to LED count (use uint16_t to avoid uint8 wraparound)
+            if ((uint16_t)start + count > RGB_MATRIX_LED_COUNT)
+                count = RGB_MATRIX_LED_COUNT - start;
+            // Clamp to packet capacity (max complete RGB triples that fit)
+            uint8_t max_from_packet = (length - 3) / 3;
+            if (count > max_from_packet)
+                count = max_from_packet;
+            for (uint8_t i = 0; i < count; i++) {
+                uint8_t off = 3 + i * 3;
+                rgb_matrix_set_color(start + i, data[off], data[off + 1], data[off + 2]);
+            }
+            // Flush to hardware -- matrix is disabled so nothing else will do it
+            rgb_matrix_update_pwm_buffers();
+            // No ACK for data packets -- avoid saturating the USB pipe.
+            return true;
+        }
+
+        case CMD_GET_TOTAL_LEDS:
+            data[1] = RGB_MATRIX_LED_COUNT;
+            raw_hid_send(data, length);
+            return true;
+
+        default:
+            return false;
     }
 }
 
