@@ -25,6 +25,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include "rgb_matrix.h"
 #include "user_kb.h"
 #include "ansi.h"
+#include "side.h"
 
 #ifdef VIA_ENABLE
 #    include "eeprom.h"
@@ -49,6 +50,7 @@ extern DEV_INFO_STRUCT dev_info;
 extern uint8_t         rf_blink_cnt;
 
 static bool rgb_streaming_mode = false;
+bool side_streaming_mode = false;
 
 extern void light_speed_control(uint8_t fast);
 extern void light_level_control(uint8_t brighten);
@@ -806,6 +808,9 @@ void via_config_get_value(uint8_t *data) {
 #define CMD_STREAMING_MODE_ON     0x25
 #define CMD_STREAMING_MODE_OFF    0x26
 #define CMD_GET_TOTAL_LEDS        0x27
+#define CMD_STREAM_SIDE_DATA      0x28
+#define CMD_SIDE_STREAMING_ON     0x29
+#define CMD_SIDE_STREAMING_OFF    0x2A
 
 bool via_command_kb(uint8_t *data, uint8_t length) {
     switch (data[0]) {
@@ -849,6 +854,38 @@ bool via_command_kb(uint8_t *data, uint8_t length) {
             data[1] = RGB_MATRIX_LED_COUNT;
             raw_hid_send(data, length);
             return true;
+
+        case CMD_SIDE_STREAMING_ON:
+            side_streaming_mode = true;
+            data[1] = 0x01;
+            raw_hid_send(data, length);
+            return true;
+
+        case CMD_SIDE_STREAMING_OFF:
+            side_streaming_mode = false;
+            data[1] = 0x01;
+            raw_hid_send(data, length);
+            return true;
+
+        case CMD_STREAM_SIDE_DATA: {
+            if (!side_streaming_mode) return true;
+            uint8_t start = data[1];
+            if (start >= SIDE_LED_NUM) return true;
+            uint8_t count = data[2];
+            if ((uint16_t)start + count > SIDE_LED_NUM)
+                count = SIDE_LED_NUM - start;
+            uint8_t max_from_packet = (length - 3) / 3;
+            if (count > max_from_packet)
+                count = max_from_packet;
+            for (uint8_t i = 0; i < count; i++) {
+                uint8_t off = 3 + i * 3;
+                side_rgb_set_color(start + i, data[off], data[off + 1], data[off + 2]);
+            }
+            // Refresh only on final packet to avoid partial-frame flash
+            if ((uint16_t)start + count >= SIDE_LED_NUM)
+                side_rgb_refresh();
+            return true;
+        }
 
         default:
             return false;

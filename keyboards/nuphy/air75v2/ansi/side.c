@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 #include <stdint.h>
 #include "ansi.h"
+#include "side.h"
 #include "color.h"
 #include "host.h"
 #include "rgb_matrix.h"
@@ -929,6 +930,8 @@ void side_led_show(void) {
         if (!f_dial_sw_init_ok) return;
         flag_power_on = 0;
     }
+
+    if (side_streaming_mode) return;
 
     side_play_cnt += timer_elapsed32(side_play_timer);
     side_play_timer = timer_read32();
