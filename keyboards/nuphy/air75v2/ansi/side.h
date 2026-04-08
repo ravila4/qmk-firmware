@@ -1,5 +1,8 @@
 // Copyright 2023 Ryodeushii (@ryodeushii)
 // SPDX-License-Identifier: GPL-2.0-or-later
+#ifndef SIDE_H
+#define SIDE_H
+
 #include <stdbool.h>
 #include <stdint.h>
 #define RIGHT_SIDE_LINE 6
@@ -42,3 +45,10 @@ enum {
 #define FLOW_COLOR_TAB_LEN 224
 
 bool breath_tab_trend(bool trend, uint8_t playpoint);
+
+void side_rgb_set_color(int index, uint8_t red, uint8_t green, uint8_t blue);
+void side_rgb_refresh(void);
+
+extern bool side_streaming_mode;
+
+#endif // SIDE_H
